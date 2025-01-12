@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>AI Assistant 🤓</title>
+    <meta name="viewport" content="initial-scale=1, width=device-width" />
+    <script src="https://unpkg.com/react@18.3.0/umd/react.development.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18.3.0/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@mui/material@6.0.0-alpha.0/umd/material-ui.development.js"
+        crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone@latest/babel.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/jwt-decode/build/jwt-decode.min.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+</head>
+
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const {
+            CssBaseline,
+            ThemeProvider,
+            Typography,
+            TextField,
+            createTheme,
+            Box,
+            AppBar,
+            Toolbar,
+            Skeleton,
+        } = MaterialUI;
+    
+        const theme = createTheme({
+            palette: {
+                mode: 'dark',
+            },
+        });
+    
+        const WS = new WebSocket("ws://localhost:8000/ws");
+    
+        function App() {
+            const [response, setResponse] = React.useState("");
+            const [question, setQuestion] = React.useState("");
+            const [loading, setLoading] = React.useState(false);
+            const [selectedMessageIndices, setSelectedMessageIndices] = React.useState([]);
+            const [messages, setMessages] = React.useState(() => {
+                return JSON.parse(localStorage.getItem('messages')) || [];
+            });
+            const [user, setUser] = React.useState(() => {
+                return JSON.parse(localStorage.getItem('user')) || null;
+            });
+            const chatContainerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!user) {
+                    google.accounts.id.initialize({
+                        client_id: "451853837653-tj6jmbvgjcc4nm44530o8rrs3rce2l1b.apps.googleusercontent.com", // Replace with your client ID
+                        callback: handleGoogleLogin,
+                    });
+                    google.accounts.id.renderButton(
+                        document.getElementById("google-signin"),
+                        { theme: "outline", size: "large" } // Customize button options
+                    );
+                }
+            }, [user]);
+
+            const handleGoogleLogin = (response) => {
+                const userData = jwt_decode(response.credential);
+                setUser(userData);
+                localStorage.setItem("user", JSON.stringify(userData));
+            };
+
+            const handleLogout = () => {
+                setUser(null);
+                localStorage.removeItem("user");
+            };
+
+            React.useEffect(() => {
+                WS.onmessage = (event) => {
+                    setLoading(false);
+                    const parsedResponse = marked.parse(event.data);
+                    setResponse(parsedResponse);
+
+                    const newMessages = [...messages, { type: 'response', text: parsedResponse }];
+                    setMessages(newMessages);
+                    localStorage.setItem('messages', JSON.stringify(newMessages));
+                };
+            }, [messages]);
+
+
+            React.useEffect(() => {
+                // Auto-scroll to the bottom of the chat container
+                if (chatContainerRef.current) {
+                    chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+                }
+            }, [messages, loading]);
+
+
+            const handleSubmit = () => {
+                if (!question.trim()) return;
+
+                const newMessages = [...messages, { type: 'question', text: question }];
+                setMessages(newMessages);
+                localStorage.setItem('messages', JSON.stringify(newMessages));
+
+                setQuestion('');
+            };
+
+            const handleSelectMessage = (index) => {
+                setSelectedMessageIndices((prevIndices) => {
+                    const existingIndex = prevIndices.findIndex((item) => item.index === index);
+
+                    if (existingIndex !== -1) {
+                        // If already selected, remove it from the array
+                        const updatedIndices = [...prevIndices];
+                        updatedIndices.splice(existingIndex, 1);
+                        return updatedIndices;
+                    } else {
+                        // If not selected, add it with the current selection order
+                        return [...prevIndices, { index, order: prevIndices.length + 1 }];
+                    }
+                });
+            };
+
+            const handleCopy = async () => {
+                const selectedMessages = selectedMessageIndices
+                    .map((item) => messages[item.index]?.text) // Access the text using item.index
+                    .filter((text) => text) // Filter out any undefined messages
+                    .join("\n"); // Combine messages into multiline text
+
+                if (selectedMessages) {
+                    try {
+                        await navigator.clipboard.writeText(selectedMessages);
+                        alert('Selected messages copied to clipboard!');
+                    } catch (err) {
+                        console.warn('Failed to use Clipboard API. Falling back to execCommand.', err);
+                        try {
+                            const textArea = document.createElement('textarea');
+                            textArea.value = selectedMessages;
+                            document.body.appendChild(textArea);
+                            textArea.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(textArea);
+                            alert('Selected messages copied to clipboard using fallback!');
+                        } catch (fallbackErr) {
+                            console.error('Fallback copy method failed as well.', fallbackErr);
+                            alert('Failed to copy to clipboard. Please try again.');
+                        }
+                    }
+                } else {
+                    alert('No messages selected to copy.');
+                }
+            };
+            
+            const handleDelete = () => {
+                const indicesToDelete = selectedMessageIndices.map((item) => item.index);
+                const newMessages = messages.filter((_, index) => !indicesToDelete.includes(index));
+
+                setMessages(newMessages);
+                localStorage.setItem('messages', JSON.stringify(newMessages));
+                setSelectedMessageIndices([]); // Clear selected indices after deletion
+            };
+
+            if (!user) {
+                return (
+                    <ThemeProvider theme={theme}>
+                        <CssBaseline />
+                        <Box
+                            display="flex"
+                            justifyContent="center"
+                            alignItems="center"
+                            height="100vh"
+                            bgcolor="background.default"
+                        >
+                            <Box
+                                display="flex"
+                                flexDirection="column"
+                                alignItems="center"
+                                gap={2}
+                                boxShadow={4}
+                                borderRadius={2}
+                                padding={4}
+                                bgcolor="background.paper"
+                            >
+                                <Typography variant="h4" color="textPrimary">
+                                    Welcome to AI Assistant 🤓
+                                </Typography>
+                                <div id="google-signin"></div>
+                            </Box>
+                        </Box>
+                    </ThemeProvider>
+                );
+            }
+
+            return (
+                <ThemeProvider theme={theme}>
+                    <CssBaseline />
+                    <Box
+                        display="flex"
+                        justifyContent="center"
+                        alignItems="center"
+                        height="100vh"
+                        bgcolor="background.default"
+                    >
+                        <Box
+                            display="flex"
+                            flexDirection="column"
+                            height="100%"
+                            width="100%"
+                            maxWidth="600px"
+                            boxShadow={4}
+                            borderRadius={2}
+                            overflow="hidden"
+                            bgcolor="background.paper"
+                        >
+
+                        <AppBar position="static">
+                            <Toolbar>
+                                <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+                                    AI Assistant 🤓
+                                </Typography>
+                                {selectedMessageIndices.length > 0 && (
+                                    <>
+                                        <button
+                                            onClick={handleCopy}
+                                            style={{
+                                                padding: '5px 15px',
+                                                borderRadius: '4px',
+                                                backgroundColor: '#ff9800',
+                                                color: 'white',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                marginRight: '10px',
+                                            }}
+                                        >
+                                            Copy
+                                        </button>
+                                        <button
+                                            onClick={handleDelete}
+                                            style={{
+                                                padding: '5px 15px',
+                                                borderRadius: '4px',
+                                                backgroundColor: '#f44336',
+                                                color: 'white',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            Delete
+                                        </button>
+                                    </>
+                                )}
+                            </Toolbar>
+                        </AppBar>
+
+                            <Box
+                                flex={1}
+                                overflow="auto"
+                                padding={2}
+                                bgcolor="background.default"
+                                display="flex"
+                                flexDirection="column"
+                                ref={chatContainerRef} // Attach the ref here
+                                sx={{
+                                    scrollbarWidth: 'none',
+                                    '&::-webkit-scrollbar': { display: 'none' },
+                                }}
+                            >
+                                {messages.map((msg, index) => {
+                                    const selectionInfo = selectedMessageIndices.find((item) => item.index === index);
+
+                                    return (
+                                        <Box
+                                            key={index}
+                                            onClick={() => handleSelectMessage(index)}
+                                            sx={{
+                                                alignSelf: msg.type === 'question' ? 'flex-start' : 'flex-end',
+                                                backgroundColor:
+                                                    selectionInfo ? '#ff9800' : msg.type === 'question' ? '#1976d2' : '#4caf50',
+                                                color: 'white',
+                                                padding: '10px',
+                                                borderRadius: '8px',
+                                                margin: '5px 0',
+                                                maxWidth: '70%',
+                                                whiteSpace: 'pre-wrap',
+                                                cursor: 'pointer',
+                                                position: 'relative', // For badge positioning
+                                                transition: 'background-color 0.3s',
+                                            }}
+                                        >
+                                            {msg.text}
+                                            {selectionInfo && (
+                                                <Box
+                                                    sx={{
+                                                        position: 'absolute',
+                                                        top: '-10px',
+                                                        right: '-10px',
+                                                        backgroundColor: '#ff5722',
+                                                        color: 'white',
+                                                        borderRadius: '50%',
+                                                        width: '20px',
+                                                        height: '20px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontSize: '12px',
+                                                        fontWeight: 'bold',
+                                                    }}
+                                                >
+                                                    {selectionInfo.order}
+                                                </Box>
+                                            )}
+                                        </Box>
+                                    );
+                                })}
+
+                                {!response && loading && (
+                                    <>
+                                        <Skeleton />
+                                        <Skeleton animation="wave" />
+                                        <Skeleton animation={false} />
+                                    </>
+                                )}
+                            </Box>
+
+                            <Box padding={2} bgcolor="background.default">
+                                <Box display="flex" alignItems="center" gap={1}>
+                                    <TextField
+                                        id="outlined-multiline"
+                                        label="Ask me Anything"
+                                        variant="outlined"
+                                        fullWidth
+                                        multiline
+                                        minRows={1}
+                                        maxRows={8}
+                                        value={question}
+                                        disabled={loading}
+                                        onChange={(e) => setQuestion(e.target.value)}
+                                    />
+                                    <button
+                                        onClick={handleSubmit}
+                                        disabled={loading || !question.trim()}
+                                        style={{
+                                            padding: '10px 20px',
+                                            borderRadius: '4px',
+                                            backgroundColor: '#1976d2',
+                                            color: 'white',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        Submit
+                                    </button>
+                                </Box>
+                            </Box>
+                        </Box>
+                    </Box>
+                </ThemeProvider>
+            );
+        }
+
+    
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+    
+    
+    
+</body>
+
+</html>
