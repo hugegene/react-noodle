@@ -7,19 +7,13 @@
     <meta name="viewport" content="initial-scale=1, width=device-width" />
     <script src="https://unpkg.com/react@18.3.0/umd/react.development.js" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/react-dom@18.3.0/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@mui/material@5.3.1/umd/material-ui.development.js"></script>
-
-    <!-- <script src="https://unpkg.com/@mui/material@6.0.0-alpha.0/umd/material-ui.development.js"
-        crossorigin="anonymous"></script> -->
+    <script src="https://unpkg.com/@mui/material@6.0.0-alpha.0/umd/material-ui.development.js"
+        crossorigin="anonymous"></script>
     <script src="https://unpkg.com/@babel/standalone@latest/babel.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- <script src="https://accounts.google.com/gsi/client" async defer></script> -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/jwt-decode/build/jwt-decode.min.js"></script>
 
-    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-auth-compat.js"></script>
-    
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet"
@@ -32,24 +26,6 @@
     <div id="root"></div>
 
     <script type="text/babel">
-
-        // const { MenuItem } = window['@mui/material'];
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyAf3GT6s3QSH6NvrFaYnYE4ao_OKsMHIII",
-            authDomain: "react-noodle.firebaseapp.com",
-            projectId: "react-noodle",
-            storageBucket: "react-noodle.firebasestorage.app",
-            messagingSenderId: "101560835561",
-            appId: "1:101560835561:web:deb423901f84120a113f78",
-            measurementId: "G-140KNT72TY"
-        };
-
-
-        // Initialize Firebase
-        const app = firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore(app);
-
         const {
             CssBaseline,
             ThemeProvider,
@@ -75,8 +51,6 @@
             const [question, setQuestion] = React.useState("");
             const [loading, setLoading] = React.useState(false);
             const [selectedMessageIndices, setSelectedMessageIndices] = React.useState([]);
-
-            // const [messages, setMessages] = React.useState([]);
             const [messages, setMessages] = React.useState(() => {
                 return JSON.parse(localStorage.getItem('messages')) || [];
             });
@@ -84,68 +58,43 @@
                 return JSON.parse(localStorage.getItem('user')) || null;
             });
             const chatContainerRef = React.useRef(null);
-            
+
             React.useEffect(() => {
-                const unsubscribe = firebase.auth().onAuthStateChanged((user) => {
-                    if (user) {
-                        const userData = {
-                            displayName: user.displayName,
-                            email: user.email,
-                            photoURL: user.photoURL,
-                            uid: user.uid,
-                        };
-
-                        setUser(userData);
-                        localStorage.setItem("user", JSON.stringify(userData));
-                    } else {
-                        setUser(null);
-                        localStorage.removeItem("user");
-                    }
-                });
-
-                return () => unsubscribe(); // Cleanup subscription on unmount
-            }, []);
-
-            const handleGoogleLogin = async () => {
-                const provider = new firebase.auth.GoogleAuthProvider();
-
-                try {
-                    const result = await firebase.auth().signInWithPopup(provider);
-                    const user = result.user;
-
-                    // Save user info in state and local storage
-                    const userData = {
-                        displayName: user.displayName,
-                        email: user.email,
-                        photoURL: user.photoURL,
-                        uid: user.uid,
-                    };
-
-                    setUser(userData);
-                    localStorage.setItem("user", JSON.stringify(userData));
-                } catch (error) {
-                    console.error("Error during Google Sign-In:", error.message);
+                if (!user) {
+                    google.accounts.id.initialize({
+                        client_id: "451853837653-tj6jmbvgjcc4nm44530o8rrs3rce2l1b.apps.googleusercontent.com", // Replace with your client ID
+                        callback: handleGoogleLogin,
+                    });
+                    google.accounts.id.renderButton(
+                        document.getElementById("google-signin"),
+                        { theme: "outline", size: "large" } // Customize button options
+                    );
                 }
+            }, [user]);
+
+            const handleGoogleLogin = (response) => {
+                const userData = jwt_decode(response.credential);
+                setUser(userData);
+                localStorage.setItem("user", JSON.stringify(userData));
             };
 
-            const handleLogout = async () => {
-                try {
-                    await firebase.auth().signOut();
-                    setUser(null);
-                    localStorage.removeItem("user");
-                } catch (error) {
-                    console.error("Error during Logout:", error.message);
-                }
+            const handleLogout = () => {
+                setUser(null);
+                localStorage.removeItem("user");
             };
 
             React.useEffect(() => {
-                const unsubscribe = db.collection("user_messages").orderBy("timestamp", "asc").onSnapshot((snapshot) => {
-                    const fetchedMessages = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-                    setMessages(fetchedMessages);
-                });
+                WS.onmessage = (event) => {
+                    setLoading(false);
+                    const parsedResponse = marked.parse(event.data);
+                    setResponse(parsedResponse);
 
-                return () => unsubscribe(); // Clean up listener
-            }, []);
+                    const newMessages = [...messages, { type: 'response', text: parsedResponse }];
+                    setMessages(newMessages);
+                    localStorage.setItem('messages', JSON.stringify(newMessages));
+                };
+            }, [messages]);
+
 
             React.useEffect(() => {
                 // Auto-scroll to the bottom of the chat container
@@ -155,22 +104,15 @@
             }, [messages, loading]);
 
 
-            const handleSubmit = async () => {
+            const handleSubmit = () => {
                 if (!question.trim()) return;
 
-                await db.collection("user_messages").add({
-                    type: "question",
-                    text: question,
-                    timestamp: new Date(),
-                });
+                const newMessages = [...messages, { type: 'question', text: question }];
+                setMessages(newMessages);
+                localStorage.setItem('messages', JSON.stringify(newMessages));
 
-                setQuestion("");
-                // Delete selected messages
-                if (selectedMessageIndices.length > 0) {
-                    setSelectedMessageIndices([]);
-                }
+                setQuestion('');
             };
-
 
             const handleSelectMessage = (index) => {
                 setSelectedMessageIndices((prevIndices) => {
@@ -218,15 +160,13 @@
                 }
             };
             
-            const handleDelete = async () => {
-                const batch = selectedMessageIndices.map(async (item) => {
-                    const docRef = db.collection("user_messages").doc(messages[item.index].id);
-                    await docRef.delete();
-                });
+            const handleDelete = () => {
+                const indicesToDelete = selectedMessageIndices.map((item) => item.index);
+                const newMessages = messages.filter((_, index) => !indicesToDelete.includes(index));
 
-                await Promise.all(batch);
-
-                setSelectedMessageIndices([]);
+                setMessages(newMessages);
+                localStorage.setItem('messages', JSON.stringify(newMessages));
+                setSelectedMessageIndices([]); // Clear selected indices after deletion
             };
 
             if (!user) {
@@ -253,9 +193,7 @@
                                 <Typography variant="h4" color="textPrimary">
                                     Welcome to AI Assistant 🤓
                                 </Typography>
-                                <div id="google-signin">
-                                <button onClick={handleGoogleLogin}>Sign in with Google</button>
-                                </div>
+                                <div id="google-signin"></div>
                             </Box>
                         </Box>
                     </ThemeProvider>
@@ -287,9 +225,8 @@
                         <AppBar position="static">
                             <Toolbar>
                                 <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                                    noodle
+                                    AI Assistant 🤓
                                 </Typography>
-                                
                                 {selectedMessageIndices.length > 0 && (
                                     <>
                                         <button
